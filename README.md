@@ -1,2 +1,5 @@
-# intel_sum_example
-Simple sum example to demonstrate building, emulation, and execution on Intel devices
+# Intel simple sum example
+
+This is a simple sum example to demonstrate the building, emulation, and execution on of an FPGA kernel on Intel devices. It takes a list of input values, adds a value to each of these, and sends the results back. The purpose of this is to demonstrate the appropriate commands for the FPGA testbed and it can also act as a template for more complex kernels.
+
+Full details about how to build and emulate this are available on the testbed website [here](https://fpga.epcc.ed.ac.uk/docs/building_emulation.html).
