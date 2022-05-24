@@ -10,6 +10,8 @@
 #include <sys/time.h>
 #include "AOCLUtils/aocl_utils.h"
 
+#define DEFAULT_DATA_SIZE 1000000
+
 using namespace aocl_utils;
 
 // Kernel name provided in the CL file
@@ -29,7 +31,8 @@ scoped_aligned_ptr<double> input_data_host, output_data_host;
 // Function prototypes
 bool init_device();
 bool init_memory(int);
-bool schedule_kernel(int, double);
+bool schedule_kernel(int, double, cl_event*, cl_event*, cl_event*);
+static float getTimeOfComponent(cl_event);
 void display_results(int);
 void cleanup();
 
@@ -37,12 +40,12 @@ void cleanup();
 int main(int argc, char * argv[]) {
   cl_int status;
 
-  if (argc != 2) {
+  if (argc > 2) {
     fprintf(stderr, "You must provide the number of elements to sum as a command line argument\n");
     return -1;
   }
 
-  int number_els=atoi(argv[1]);
+  int number_els=argc == 2 ? atoi(argv[1]) : DEFAULT_DATA_SIZE;
 
   if(!init_device()) return -1;
   printf("Kernel initialization is complete\n");
@@ -50,21 +53,32 @@ int main(int argc, char * argv[]) {
   if(!init_memory(number_els)) return -1;
   printf("Memory initialization is complete\n");
 
-  if (!schedule_kernel(number_els, 100)) return -1;
+  cl_event copy_on_event, kernel_event, copy_off_event;
+  if (!schedule_kernel(number_els, 100, &copy_on_event, &kernel_event, &copy_off_event)) return -1;
   printf("Kernel execution has been scheduled\n");
 
   // Wait for command queue to complete pending events
   status = clFinish(queue);
   checkError(status, "Failed to finish execution based on schedule");
 
-  printf("Kernel execution has completed successfully\n");
+  float copy_on_time=getTimeOfComponent(copy_on_event);
+  float exec_time=getTimeOfComponent(kernel_event);
+  float copy_off_time=getTimeOfComponent(copy_off_event);
 
-  display_results(number_els);
+  printf("Execution complete for %d elements, total runtime : %.3f ms, (%.3f ms xfer on, %.3f ms execute, %.3f ms xfer off)\n", number_els, copy_on_time + exec_time + copy_off_time, copy_on_time, exec_time, copy_off_time);  
 
   // Free the resources allocated
   cleanup();
 
   return 0;
+}
+
+static float getTimeOfComponent(cl_event event) {
+  cl_ulong tstart, tstop;
+  
+  clGetEventProfilingInfo(event, CL_PROFILING_COMMAND_START, sizeof(cl_ulong), &tstart, NULL);
+  clGetEventProfilingInfo(event, CL_PROFILING_COMMAND_END, sizeof(cl_ulong), &tstop, NULL);
+  return (tstop-tstart)/1.E6;
 }
 
 void display_results(int number_els) {
@@ -74,9 +88,8 @@ void display_results(int number_els) {
   }
 }
 
-bool schedule_kernel(int number_els, double number_to_add) {
+bool schedule_kernel(int number_els, double number_to_add, cl_event * copy_on_event, cl_event * kernel_event, cl_event * copy_off_event) {
   cl_int status;
-  cl_event copy_on_event, kernel_event, copy_off_event;
 
   // Set the kernel arguments
   status = clSetKernelArg(kernel, 0, sizeof(cl_mem), &input_data);
@@ -88,11 +101,11 @@ bool schedule_kernel(int number_els, double number_to_add) {
   status = clSetKernelArg(kernel, 3, sizeof(int), &number_els);
   checkError(status, "Failed to set kernel arg 3");
 
-  status = clEnqueueWriteBuffer(queue, input_data, CL_FALSE, 0,  number_els * sizeof(double), input_data_host, 0, NULL, &copy_on_event);
+  status = clEnqueueWriteBuffer(queue, input_data, CL_FALSE, 0,  number_els * sizeof(double), input_data_host, 0, NULL, copy_on_event);
   checkError(status, "Failed to schedule transfer of input data");
-  status = clEnqueueTask(queue, kernel, 1, &copy_on_event, &kernel_event);
+  status = clEnqueueTask(queue, kernel, 1, copy_on_event, kernel_event);
   checkError(status, "Failed to launch read_data_kernel");
-  status = clEnqueueReadBuffer(queue, output_data, CL_FALSE, 0, number_els * sizeof(double), output_data_host, 1, &kernel_event, &copy_off_event);
+  status = clEnqueueReadBuffer(queue, output_data, CL_FALSE, 0, number_els * sizeof(double), output_data_host, 1, kernel_event, copy_off_event);
   checkError(status, "Failed to transfer output su_data");
 
   return true;
